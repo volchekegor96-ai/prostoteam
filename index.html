@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Атернос сервера Prosto Team | Сборки серверов Minecraft</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              900: '#14532d',
+            },
+            aternos: {
+              blue: '#2c3e50',
+              accent: '#3498db',
+            },
+            dark: {
+              bg: '#0b0f17',
+              card: '#131b2e',
+              hover: '#1c2845',
+              border: '#233254',
+            }
+          },
+          animation: {
+            'glow': 'glow 3s infinite alternate',
+          },
+          keyframes: {
+            glow: {
+              '0%': { boxShadow: '0 0 15px rgba(34, 197, 94, 0.2)' },
+              '100%': { boxShadow: '0 0 30px rgba(34, 197, 94, 0.6)' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons & React Scripts -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0b0f17;
+      color: #e2e8f0;
+    }
+    .mc-font {
+      font-family: 'Press Start 2P', cursive;
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0b0f17;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #233254;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3498db;
+    }
+  </style>
+</head>
+<body class="min-h-screen selection:bg-brand-500 selection:text-black">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // Email администратора
+    const ADMIN_EMAIL = 'volchekegor96@gmail.com';
+
+    // URL облачного API / бэкенда (если оставить пустым — используется локальное хранилище браузера)
+    // Пример: 'https://ваш-бэкенд.onrender.com/api/assemblies' или эндпоинт вашего API для MongoDB
+    const CLOUD_API_URL = '';
+
+    // Ядра / Библиотеки
+    const LOADER_OPTIONS = [
+      { id: 'Forge', name: 'Forge', color: 'bg-amber-900/40 text-amber-300 border-amber-600/50' },
+      { id: 'Fabric', name: 'Fabric', color: 'bg-stone-800 text-stone-200 border-stone-500' },
+      { id: 'Paper', name: 'Paper / Spigot', color: 'bg-sky-900/40 text-sky-300 border-sky-600/50' },
+      { id: 'NeoForge', name: 'NeoForge', color: 'bg-orange-900/40 text-orange-300 border-orange-600/50' },
+      { id: 'Quilt', name: 'Quilt', color: 'bg-purple-900/40 text-purple-300 border-purple-600/50' },
+      { id: 'Vanilla', name: 'Vanilla', color: 'bg-emerald-900/40 text-emerald-300 border-emerald-600/50' },
+    ];
+
+    // Безопасный компонент-обёртка для иконок Lucide, чтобы не ломать DOM React
+    function Icon({ name, className = 'w-4 h-4' }) {
+      const containerRef = React.useRef(null);
+
+      useEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+
+        el.innerHTML = '';
+        const iconSvg = window.lucide?.icons?.[name];
+
+        if (iconSvg && typeof iconSvg.toSvg === 'function') {
+          el.innerHTML = iconSvg.toSvg({ class: className });
+        } else {
+          const iTag = document.createElement('i');
+          iTag.setAttribute('data-lucide', name);
+          iTag.className = className;
+          el.appendChild(iTag);
+          if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            window.lucide.createIcons({ root: el });
+          }
+        }
+      }, [name, className]);
+
+      return <span ref={containerRef} className="inline-flex items-center justify-center leading-none" />;
+    }
+
+    function App() {
+      // Состояния
+      const [currentUser, setCurrentUser] = useState(null); // email если вошел
+      const [assemblies, setAssemblies] = useState([]);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [selectedLoader, setSelectedLoader] = useState('All');
+      const [selectedVersion, setSelectedVersion] = useState('All');
+      const [copiedId, setCopiedId] = useState(null);
+      const [loginEmailInput, setLoginEmailInput] = useState('');
+      const [formData, setFormData] = useState({
+        title: '',
+        loader: 'Forge',
+        version: '1.20.1',
+        description: '',
+        downloadUrl: '',
+        aternosUrl: ''
+      });
+
+      // Состояния синхронизации и модальных окон
+      const [syncStatus, setSyncStatus] = useState('Локально');
+      const [isSyncing, setIsSyncing] = useState(false);
+      const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+      const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [editingAssembly, setEditingAssembly] = useState(null);
+
+      const isAdmin =
+        typeof currentUser === 'string' &&
+        currentUser.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+      // Загрузка сборок из облака (если задан CLOUD_API_URL) или localStorage
+      useEffect(() => {
+        let isMounted = true;
+
+        async function loadAssemblies() {
+          setIsSyncing(true);
+          try {
+            if (CLOUD_API_URL && CLOUD_API_URL.trim() !== '') {
+              const response = await fetch(CLOUD_API_URL);
+              if (!response.ok) {
+                throw new Error('Ошибка ответа сервера');
+              }
+              const data = await response.json();
+              const list = Array.isArray(data) ? data : (Array.isArray(data.assemblies) ? data.assemblies : []);
+              if (isMounted) {
+                setAssemblies(list);
+                setSyncStatus('Облако 24/7');
+              }
+            } else {
+              const saved = localStorage.getItem('prosto_team_assemblies');
+              if (isMounted) {
+                setAssemblies(saved ? JSON.parse(saved) : []);
+                setSyncStatus('Локально');
+              }
+            }
+          } catch (error) {
+            console.error('Ошибка загрузки сборок:', error);
+            try {
+              const fallback = localStorage.getItem('prosto_team_assemblies');
+              if (isMounted) {
+                setAssemblies(fallback ? JSON.parse(fallback) : []);
+                setSyncStatus('Локальный кэш');
+              }
+            } catch (_) {
+              if (isMounted) {
+                setAssemblies([]);
+              }
+            }
+          } finally {
+            if (isMounted) {
+              setIsSyncing(false);
+            }
+          }
+        }
+
+        loadAssemblies();
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      // Сохранение списка сборок в localStorage и при необходимости в облачный API
+      async function persistAssemblies(nextList) {
+        setAssemblies(nextList);
+        try {
+          localStorage.setItem('prosto_team_assemblies', JSON.stringify(nextList));
+        } catch (error) {
+          console.error('Ошибка сохранения в localStorage:', error);
+        }
+
+        if (CLOUD_API_URL && CLOUD_API_URL.trim() !== '') {
+          setIsSyncing(true);
+          try {
+            const response = await fetch(CLOUD_API_URL, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Admin-Email': currentUser || ''
+              },
+              body: JSON.stringify({ assemblies: nextList })
+            });
+            if (!response.ok) {
+              throw new Error('Ошибка сохранения в облако');
+            }
+            setSyncStatus('Облако 24/7');
+          } catch (error) {
+            console.error('Ошибка синхронизации с облаком:', error);
+            setSyncStatus('Ошибка облака');
+          } finally {
+            setIsSyncing(false);
+          }
+        }
+      }
+
+      // Вход и выход из аккаунта
+      function handleLogin(e) {
+        e.preventDefault();
+        const email = loginEmailInput.trim();
+        if (!email) return;
+        setCurrentUser(email);
+        setLoginEmailInput('');
+        setIsAuthModalOpen(false);
+      }
+
+      function handleLogout() {
+        setCurrentUser(null);
+        setIsAddModalOpen(false);
+        setEditingAssembly(null);
+      }
+
+      // Открытие окна создания или редактирования сборки
+      function openAddModal(assembly = null) {
+        if (!isAdmin) return;
+        if (assembly) {
+          setEditingAssembly(assembly);
+          setFormData({
+            title: assembly.title || '',
+            loader: assembly.loader || 'Forge',
+            version: assembly.version || '',
+            description: assembly.description || '',
+            downloadUrl: assembly.downloadUrl || '',
+            aternosUrl: assembly.aternosUrl || ''
+          });
+        } else {
+          setEditingAssembly(null);
+          setFormData({
+            title: '',
+            loader: 'Forge',
+            version: '',
+            description: '',
+            downloadUrl: '',
+            aternosUrl: ''
+          });
+        }
+        setIsAddModalOpen(true);
+      }
+
+      // Сохранение новой или отредактированной сборки
+      async function handleFormSubmit(e) {
+        e.preventDefault();
+        if (!isAdmin) return;
+
+        const cleaned = {
+          id: editingAssembly ? editingAssembly.id : String(Date.now()),
+          title: formData.title.trim(),
+          loader: formData.loader,
+          version: formData.version.trim(),
+          description: formData.description.trim(),
+          downloadUrl: formData.downloadUrl.trim(),
+          aternosUrl: formData.aternosUrl.trim()
+        };
+
+        const updatedList = editingAssembly
+          ? assemblies.map(item => (item.id === editingAssembly.id ? cleaned : item))
+          : [cleaned, ...assemblies];
+
+        await persistAssemblies(updatedList);
+        setIsAddModalOpen(false);
+        setEditingAssembly(null);
+      }
+
+      // Удаление сборки
+      async function handleDelete(id) {
+        if (!isAdmin) return;
+        const updatedList = assemblies.filter(item => item.id !== id);
+        await persistAssemblies(updatedList);
+      }
+
+      // Копирование IP-адреса в буфер обмена
+      function handleCopyIp(id, ipText) {
+        if (!ipText) return;
+        const text = String(ipText);
+
+        const markCopied = () => {
+          setCopiedId(id);
+          setTimeout(() => {
+            setCopiedId(prev => (prev === id ? null : prev));
+          }, 2000);
+        };
+
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          navigator.clipboard.writeText(text).then(markCopied).catch(() => {
+            fallbackCopy(text);
+            markCopied();
+          });
+        } else {
+          fallbackCopy(text);
+          markCopied();
+        }
+      }
+
+      function fallbackCopy(text) {
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        } catch (error) {
+          console.error('Не удалось скопировать текст:', error);
+        }
+      }
+
+      // Фильтрация
+      const availableVersions = useMemo(() => {
+        const versions = new Set(
+          assemblies
+            .map(item => (item.version || '').trim())
+            .filter(Boolean)
+        );
+        return Array.from(versions);
+      }, [assemblies]);
+
+      const filteredAssemblies = useMemo(() => {
+        return assemblies.filter(item => {
+          const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                item.description.toLowerCase().includes(searchQuery.toLowerCase());
+          const matchesLoader = selectedLoader === 'All' || item.loader === selectedLoader;
+          const matchesVersion = selectedVersion === 'All' || item.version === selectedVersion;
+          return matchesSearch && matchesLoader && matchesVersion;
+        });
+      }, [assemblies, searchQuery, selectedLoader, selectedVersion]);
+
+      return (
+        <div className="min-h-screen flex flex-col">
+
+          {/* HEADER */}
+          <header className="sticky top-0 z-40 bg-dark-bg/90 backdrop-blur-md border-b border-dark-border">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+
+              {/* Logo */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-brand-500 to-emerald-700 flex items-center justify-center shadow-lg shadow-brand-500/20 border border-brand-500/40">
+                  <Icon name="box" className="w-6 h-6 text-black font-bold" />
+                </div>
+                <div>
+                  <h1 className="mc-font text-xs sm:text-sm text-white tracking-wider">
+                    PROSTO<span className="text-brand-500"> TEAM</span>
+                  </h1>
+                  <p className="text-xs text-gray-400">
+                    Атернос сервера Prosto Team{syncStatus ? ` • ${syncStatus}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              {/* User / Auth Info */}
+              <div className="flex items-center gap-3 sm:gap-4">
+                {isSyncing && (
+                  <span className="text-xs text-sky-400 hidden sm:inline">Синхронизация...</span>
+                )}
+                {isAdmin && (
+                  <button
+                    onClick={() => openAddModal()}
+                    className="flex items-center gap-2 bg-gradient-to-r from-brand-500 to-emerald-600 hover:from-brand-600 hover:to-emerald-700 text-black font-semibold text-xs sm:text-sm px-3 sm:px-4 py-2 rounded-lg shadow-md hover:shadow-brand-500/20 transition-all duration-200 cursor-pointer"
+                  >
+                    <Icon name="plus-circle" className="w-4 h-4" />
+                    <span className="hidden sm:inline">Добавить сборку</span>
+                    <span className="sm:hidden">Создать</span>
+                  </button>
+                )}
+
+                {currentUser ? (
+                  <div className="flex items-center gap-2 sm:gap-3 bg-dark-card border border-dark-border px-3 py-1.5 rounded-xl">
+                    <div className="flex flex-col text-right">
+                      <span className="text-xs font-medium text-gray-200 truncate max-w-[120px] sm:max-w-[200px]">
+                        {currentUser}
+                      </span>
+                      <span className={`text-[10px] font-bold ${isAdmin ? 'text-brand-500' : 'text-gray-400'}`}>
+                        {isAdmin ? '★ Администратор' : 'Посетитель'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleLogout}
+                      title="Выйти"
+                      className="p-1.5 hover:bg-red-500/10 text-gray-400 hover:text-red-400 rounded-lg transition-colors"
+                    >
+                      <Icon name="log-out" className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsAuthModalOpen(true)}
+                    className="flex items-center gap-2 border border-dark-border bg-dark-card hover:bg-dark-hover text-gray-200 font-medium text-xs sm:text-sm px-4 py-2 rounded-xl transition-all"
+                  >
+                    <Icon name="user" className="w-4 h-4 text-brand-500" />
+                    <span>Войти</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {/* HERO SECTION */}
+          <section className="relative overflow-hidden bg-gradient-to-b from-dark-card/40 to-transparent border-b border-dark-border/40 py-12 px-4 sm:px-6">
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-brand-500/10 via-transparent to-transparent pointer-events-none"></div>
+
+            <div className="max-w-4xl mx-auto text-center relative z-10">
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-brand-500/10 text-brand-500 border border-brand-500/20 mb-4">
+                <Icon name="sparkles" className="w-3.5 h-3.5" />
+                Официальный портал Prosto Team
+              </span>
+              <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight mb-3">
+                Атернос сервера Prosto Team
+              </h2>
+              <p className="text-gray-400 text-sm sm:text-base max-w-2xl mx-auto mb-8">
+                Выбирайте лучшие оптимизированные сборки плагинов и модов под популярные ядра Minecraft. Скачивайте архив и загружайте на Aternos без лишних хлопот.
+              </p>
+
+              {/* Notice for visitors */}
+              {!isAdmin && (
+                <div className="inline-flex items-center gap-2 text-xs bg-dark-card/80 border border-dark-border px-4 py-2 rounded-lg text-gray-400">
+                  <Icon name="lock" className="w-4 h-4 text-amber-400" />
+                  <span>Публикация сборок доступна только администратору портала</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* MAIN CONTENT & FILTERS */}
+          <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+
+            {/* Filter Bar */}
+            <div className="bg-dark-card border border-dark-border rounded-2xl p-4 mb-8 shadow-xl">
+              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+
+                {/* Search */}
+                <div className="relative w-full md:w-96">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
+                    <Icon name="search" className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Поиск по названию или описанию..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-dark-bg border border-dark-border rounded-xl pl-10 pr-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-brand-500 transition-colors"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
+                      <Icon name="x" className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filters Group */}
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+
+                  {/* Core Loader Selector */}
+                  <div className="flex items-center gap-2 bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 w-full sm:w-auto">
+                    <Icon name="cpu" className="w-4 h-4 text-gray-400" />
+                    <span className="text-xs text-gray-400 font-medium">Ядро:</span>
+                    <select
+                      value={selectedLoader}
+                      onChange={(e) => setSelectedLoader(e.target.value)}
+                      className="bg-transparent text-sm text-gray-200 focus:outline-none cursor-pointer pr-2"
+                    >
+                      <option value="All" className="bg-dark-card">Все ядра</option>
+                      {LOADER_OPTIONS.map(opt => (
+                        <option key={opt.id} value={opt.id} className="bg-dark-card">{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Version Selector */}
+                  <div className="flex items-center gap-2 bg-dark-bg border border-dark-border rounded-xl px-3 py-1.5 w-full sm:w-auto">
+                    <Icon name="layers" className="w-4 h-4 text-gray-400" />
+                    <span className="text-xs text-gray-400 font-medium">Версия:</span>
+                    <select
+                      value={selectedVersion}
+                      onChange={(e) => setSelectedVersion(e.target.value)}
+                      className="bg-transparent text-sm text-gray-200 focus:outline-none cursor-pointer pr-2"
+                    >
+                      <option value="All" className="bg-dark-card">Все версии</option>
+                      {availableVersions.map(v => (
+                        <option key={v} value={v} className="bg-dark-card">{v}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Reset Filters */}
+                  {(selectedLoader !== 'All' || selectedVersion !== 'All' || searchQuery) && (
+                    <button
+                      onClick={() => { setSelectedLoader('All'); setSelectedVersion('All'); setSearchQuery(''); }}
+                      className="text-xs text-brand-500 hover:underline px-2 py-1"
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Assemblies Grid */}
+            {filteredAssemblies.length === 0 ? (
+              <div className="text-center py-16 bg-dark-card/40 border border-dark-border rounded-2xl">
+                <Icon name="package-open" className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                <h3 className="text-lg font-semibold text-gray-300">Сборки не найдены</h3>
+                <p className="text-sm text-gray-500 mt-1">Попробуйте изменить параметры поиска или фильтров</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredAssemblies.map((item) => {
+                  const loaderInfo = LOADER_OPTIONS.find(l => l.id === item.loader) || { name: item.loader, color: 'bg-gray-800 text-gray-300 border-gray-600' };
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-dark-card border border-dark-border hover:border-brand-500/40 rounded-2xl p-6 flex flex-col justify-between transition-all duration-300 hover:shadow-xl hover:-translate-y-1 group"
+                    >
+                      <div>
+                        {/* Tags & Action header */}
+                        <div className="flex items-center justify-between mb-4 gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`text-xs font-semibold px-2.5 py-1 rounded-md border ${loaderInfo.color}`}>
+                              {loaderInfo.name}
+                            </span>
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-dark-bg text-brand-500 border border-brand-500/30">
+                              {item.version}
+                            </span>
+                          </div>
+
+                          {/* Admin Controls */}
+                          {isAdmin && (
+                            <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={() => openAddModal(item)}
+                                className="p-1.5 hover:bg-dark-hover text-gray-400 hover:text-white rounded-lg"
+                                title="Редактировать"
+                              >
+                                <Icon name="edit-3" className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(item.id)}
+                                className="p-1.5 hover:bg-red-500/10 text-gray-400 hover:text-red-400 rounded-lg"
+                                title="Удалить"
+                              >
+                                <Icon name="trash-2" className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Title & Desc */}
+                        <h3 className="text-lg font-bold text-white mb-2 line-clamp-2 group-hover:text-brand-500 transition-colors">
+                          {item.title}
+                        </h3>
+                        <p className="text-sm text-gray-400 mb-6 line-clamp-4 leading-relaxed">
+                          {item.description}
+                        </p>
+                      </div>
+
+                      {/* Download & Aternos buttons */}
+                      <div className="space-y-2.5 pt-4 border-t border-dark-border/60">
+                        {item.downloadUrl && item.downloadUrl.trim() !== '' && (
+                          <a
+                            href={item.downloadUrl.startsWith('http') ? item.downloadUrl : `https://${item.downloadUrl}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full flex items-center justify-center gap-2 bg-brand-500 hover:bg-brand-600 text-black font-semibold text-sm py-2.5 px-4 rounded-xl shadow-md transition-colors"
+                          >
+                            <Icon name="download" className="w-4 h-4" />
+                            <span>Скачать сборку</span>
+                          </a>
+                        )}
+
+                        {item.aternosUrl.startsWith('http://') || item.aternosUrl.startsWith('https://') ? (
+                          <a
+                            href={item.aternosUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full flex items-center justify-center gap-2 bg-dark-bg hover:bg-dark-hover border border-dark-border text-sky-400 hover:text-sky-300 font-medium text-xs sm:text-sm py-2 px-4 rounded-xl transition-colors"
+                          >
+                            <Icon name="external-link" className="w-3.5 h-3.5" />
+                            <span>Перейти на Aternos</span>
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyIp(item.id, item.aternosUrl)}
+                            className={`w-full flex items-center justify-center gap-2 border text-xs sm:text-sm py-2 px-4 rounded-xl font-medium transition-all duration-200 ${
+                              copiedId === item.id
+                                ? 'bg-brand-500/20 border-brand-500 text-brand-400'
+                                : 'bg-dark-bg hover:bg-dark-hover border-dark-border text-sky-400 hover:text-sky-300'
+                            }`}
+                          >
+                            <Icon name={copiedId === item.id ? "check" : "copy"} className="w-3.5 h-3.5" />
+                            <span>{copiedId === item.id ? 'IP скопирован в буфер!' : `Скопировать IP: ${item.aternosUrl}`}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </main>
+
+          {/* FOOTER */}
+          <footer className="mt-auto border-t border-dark-border bg-dark-card/50 py-6 text-center text-xs text-gray-500">
+            <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p>© Атернос сервера Prosto Team. Не является официальным сервисом Mojang или Aternos.</p>
+              <p className="text-gray-400">Prosto Team Admin Portal</p>
+            </div>
+          </footer>
+
+          {/* MODAL: AUTHENTICATION */}
+          {isAuthModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-dark-card border border-dark-border rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+                <button
+                  onClick={() => setIsAuthModalOpen(false)}
+                  className="absolute right-4 top-4 text-gray-400 hover:text-white"
+                >
+                  <Icon name="x" className="w-5 h-5" />
+                </button>
+
+                <div className="text-center mb-6">
+                  <div className="w-12 h-12 bg-brand-500/10 text-brand-500 rounded-full flex items-center justify-center mx-auto mb-3 border border-brand-500/20">
+                    <Icon name="key-round" className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white">Авторизация</h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Введите E-mail администратора для управления сборками
+                  </p>
+                </div>
+
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1.5">E-mail адрес</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="ваша_почта@gmail.com"
+                      value={loginEmailInput}
+                      onChange={(e) => setLoginEmailInput(e.target.value)}
+                      className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-brand-500 hover:bg-brand-600 text-black font-semibold text-sm py-2.5 rounded-xl transition-colors shadow-md"
+                  >
+                    Войти в систему
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: ADD / EDIT ASSEMBLY (ADMIN ONLY) */}
+          {isAddModalOpen && isAdmin && (
+            <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-dark-card border border-dark-border rounded-2xl w-full max-w-xl p-6 shadow-2xl relative my-8">
+                <button
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="absolute right-4 top-4 text-gray-400 hover:text-white"
+                >
+                  <Icon name="x" className="w-5 h-5" />
+                </button>
+
+                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                  <Icon name="plus-square" className="w-5 h-5 text-brand-500" />
+                  {editingAssembly ? 'Редактировать сборку' : 'Опубликовать новую сборку'}
+                </h3>
+
+                <form onSubmit={handleFormSubmit} className="space-y-4">
+                  {/* Title */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1.5">Название сборки *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Например: TechnoMagic 1.20.1 Ultimate"
+                      value={formData.title}
+                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                      className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  {/* Loader & Version */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-300 mb-1.5">Ядро / Библиотека *</label>
+                      <select
+                        value={formData.loader}
+                        onChange={(e) => setFormData({ ...formData, loader: e.target.value })}
+                        className="w-full bg-dark-bg border border-dark-border rounded-xl px-3 py-2.5 text-sm text-gray-100 focus:outline-none focus:border-brand-500 cursor-pointer"
+                      >
+                        {LOADER_OPTIONS.map(opt => (
+                          <option key={opt.id} value={opt.id} className="bg-dark-card">{opt.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-300 mb-1.5">Версия Minecraft (вручную) *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Например: 1.20.4 или 1.16.5"
+                        value={formData.version}
+                        onChange={(e) => setFormData({ ...formData, version: e.target.value })}
+                        className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1.5">Описание сборки *</label>
+                    <textarea
+                      required
+                      rows="4"
+                      placeholder="Подробно опишите список основных модов/плагинов, особенности сборки и рекомендации по ОЗУ..."
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand-500 resize-none"
+                    ></textarea>
+                  </div>
+
+                  {/* Links */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1.5">
+                      Ссылка на скачивание сборки {formData.loader === 'Vanilla' ? '(необязательно для Vanilla)' : '*'}
+                    </label>
+                    <input
+                      type="text"
+                      required={formData.loader !== 'Vanilla'}
+                      placeholder={
+                        formData.loader === 'Vanilla'
+                          ? 'Для Vanilla можно оставить пустым'
+                          : 'https://modrinth.com/... или любая другая ссылка'
+                      }
+                      value={formData.downloadUrl}
+                      onChange={(e) => setFormData({ ...formData, downloadUrl: e.target.value })}
+                      className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 mb-1.5">IP-адрес сервера или ссылка на Aternos *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Например: E7OR_BRO.aternos.me:39813 (или ссылка)"
+                      value={formData.aternosUrl}
+                      onChange={(e) => setFormData({ ...formData, aternosUrl: e.target.value })}
+                      className="w-full bg-dark-bg border border-dark-border rounded-xl px-4 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddModalOpen(false)}
+                      className="px-4 py-2 rounded-xl border border-dark-border text-gray-300 hover:bg-dark-hover text-sm font-medium transition-colors"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-black font-semibold text-sm transition-colors shadow-md"
+                    >
+                      {editingAssembly ? 'Сохранить изменения' : 'Опубликовать сборку'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
